@@ -1,18 +1,17 @@
 CC = gcc
 LD = gcc
-CFLAGS = -Wall
+CFLAGS = -Wall -g -O0
 LDFLAGS =
 
-all: myexec ish
+all: ish
 
 ish: parser ish.o
-	$(CC) $(CFLAGS) ish.o parser/parse.o -o ish
+	$(CC) $(CFLAGS) ish.o parser/parse.o parser/print.o -o ish
+
+ish.o: config.h
 
 parser:
 	cd parser; make
-
-myexec: myexec.o
-	$(LD) $(LDFLAGS) -o $@ $^
 
 clean:
 	cd parser; make clean

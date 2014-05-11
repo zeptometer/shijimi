@@ -1,11 +1,8 @@
 CC = gcc
-CFLAGS = -Wall
+CFLAGS = -Wall -g -O0
 SRCS = parser.c
 
-all: parse.o
-
-parser.o:
-	$(CC) $(CLAGS) parse.c print.c -c -o parse.o
+all: parse.o print.o
 
 clean:
 	$(RM) *.o
