@@ -17,14 +17,12 @@
 
 #define BUF_LEN 1000
 
-char nullstr[1] = "\0";
-
 int main(int argc, char** argv, char** envp) {
   char buf[BUF_LEN];
   job* j;
   process p;
   pid_t pid;
-  int status, n_process;
+  int status;
   int pipefd[2];
 
   while (1) {
@@ -59,17 +57,17 @@ int main(int argc, char** argv, char** envp) {
 	out = pipefd[1];
       } else if (p.next == NULL && p.output_redirection) {
 	switch (p.output_option) {
-	case TRUNC:
-	  out = open(p.output_redirection, O_CREAT | O_WRONLY);
-	  break;
+	  int op = 0;
 	case APPEND:
-	  out = open(p.output_redirection, O_CREAT | O_WRONLY | O_APPEND);
+	  op |= O_APPEND;
+	case TRUNC:
+	  op |= O_CREAT | O_WRONLY;
 	  break;
 	default:
-	  out = -1;
-	  perror("unknown mode");
+	  fputs(stderr, "invalid mode");
 	  abort();
 	}
+	out = open(p.output_redirection, op);
 	access(p.output_redirection, R_OK|W_OK);
       } else {
 	out = 1;
@@ -77,26 +75,15 @@ int main(int argc, char** argv, char** envp) {
 
       pid = fork();
       if (pid == 0) {
-	if (in != 0) {
-	  dup2(in, 0);
-	  close(in);
-	}
-	if (pipefd[0] != 0) {
-	  close(pipefd[0]);
-	}
-	if (out != 1) {
-	  dup2(out, 1);
-	  close(out);
-	}
+	dup2(in, 0);
+	dup2(out, 1);
+	if (pipefd[0] != 0) close(pipefd[0]);
+	if (in != 0)        close(in);
+	if (out != 1)       close(out);
 	execve(p.program_name, p.argument_list, envp);
       } else {
-	n_process++;
-	if (in != 0)  {close(in);}
-	if (out != 1) {close(out);}
-	if (n_process >= PLEN && p.next != NULL) {
-	  perror("process number overflow");
-	  break;
-	}
+	if (in != 0)  close(in);
+	if (out != 1) close(out);
 	if (p.next == NULL) {
 	  break;
 	}
