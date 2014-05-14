@@ -24,7 +24,7 @@ int main(int argc, char** argv, char** envp) {
   job* j;
   process p;
   pid_t pid;
-  int status, n_process, i;
+  int status, n_process;
   int pipefd[2];
 
   while (1) {
@@ -103,10 +103,8 @@ int main(int argc, char** argv, char** envp) {
 	p = *p.next;
       }
     }
-    for (i=0; i<n_process; i++) {
-      /* waitpid(pids[i], &status, WEXITED);  */
-      wait(&status);
-    }
+    while (wait(&status) != -1)
+      ;
   }
 
   return 0;
