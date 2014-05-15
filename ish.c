@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <signal.h>
 
 #include <stdio.h>
 #include <unistd.h>
@@ -17,38 +18,46 @@
 
 #define BUF_LEN 1000
 
+const pid_t INVALID_PID = -1;
+pid_t shell_pgid, current_pgid;
+struct sigaction sigign, sigdefault;
+
 int main(int argc, char** argv, char** envp) {
   char buf[BUF_LEN];
   job* j;
   process p;
-  pid_t pid;
   int status;
   int pipefd[2];
 
+  sigign.sa_handler = SIG_IGN;
+  sigdefault.sa_handler = SIG_DFL;
+
+  sigaction(SIGINT, &sigign, NULL);
+  sigaction(SIGTTOU, &sigign, NULL);
+
+  current_pgid = shell_pgid = getpgrp();
+
   while (1) {
-    get_line(buf, BUF_LEN);
-    if (buf[0] == '\0') {
+    pid_t pid;
+
+    if (get_line(buf, BUF_LEN) == NULL)
       break;
-    }
     j = parse_line(buf);
-    if (j == NULL) {
-      break;
-    }
+    if (j == NULL)
+      continue;
+
 #ifdef DEBUG
     print_job_list(j);
 #endif
+
     p = j->process_list[0];
-    n_process = 0;
-
-    if (strcmp(p.program_name, "exit") == 0) {
+    if (strcmp(p.program_name, "exit") == 0)
       break;
-    }
 
-    if (p.input_redirection) {
+    if (p.input_redirection)
       pipefd[0] = open(p.input_redirection, O_RDONLY);
-    } else {
+    else
       pipefd[0] = 0;
-    }
 
     while (1) {
       int in = pipefd[0], out;
@@ -56,15 +65,15 @@ int main(int argc, char** argv, char** envp) {
 	pipe(pipefd);
 	out = pipefd[1];
       } else if (p.next == NULL && p.output_redirection) {
+	int op = 0;
 	switch (p.output_option) {
-	  int op = 0;
 	case APPEND:
 	  op |= O_APPEND;
 	case TRUNC:
 	  op |= O_CREAT | O_WRONLY;
 	  break;
 	default:
-	  fputs(stderr, "invalid mode");
+	  fputs("invalid mode", stderr);
 	  abort();
 	}
 	out = open(p.output_redirection, op);
@@ -75,6 +84,9 @@ int main(int argc, char** argv, char** envp) {
 
       pid = fork();
       if (pid == 0) {
+	sigaction(SIGINT, &sigdefault, NULL);
+	sigaction(SIGTTOU, &sigdefault, NULL);
+
 	dup2(in, 0);
 	dup2(out, 1);
 	if (pipefd[0] != 0) close(pipefd[0]);
@@ -82,16 +94,35 @@ int main(int argc, char** argv, char** envp) {
 	if (out != 1)       close(out);
 	execve(p.program_name, p.argument_list, envp);
       } else {
+	if (current_pgid == shell_pgid) {
+	  current_pgid = pid;
+	  if (j->mode == FOREGROUND)
+	    tcsetpgrp(current_pgid, current_pgid);
+	}
+	setpgid(pid, current_pgid);
+
 	if (in != 0)  close(in);
 	if (out != 1) close(out);
-	if (p.next == NULL) {
-	  break;
-	}
+	if (p.next == NULL) break;
 	p = *p.next;
       }
     }
-    while (wait(&status) != -1)
-      ;
+
+    switch (j->mode) {
+    case FOREGROUND:
+      while (waitpid(-current_pgid, &status, 0) != -1)
+	;
+      tcsetpgrp(0, shell_pgid);
+      current_pgid = shell_pgid;
+      break;
+    case BACKGROUND:
+      waitpid(-current_pgid, &status, WNOHANG);
+      break;
+    default:
+      fputs("invalid mode", stderr);
+      abort();
+    }
+    current_pgid = shell_pgid;
   }
 
   return 0;
