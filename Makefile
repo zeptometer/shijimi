@@ -1,6 +1,6 @@
 CC = gcc
 LD = gcc
-CFLAGS = -Wall -g -O0
+CFLAGS = -Wall -g -O0 -std=gnu99
 LDFLAGS =
 
 all: ish
