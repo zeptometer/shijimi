@@ -1,20 +1,10 @@
 CC = gcc
-LD = gcc
-CFLAGS = -Wall -g -O0 -std=gnu99
-LDFLAGS =
+CFLAGS = -Wall -g -O0
+SRCS = parser.c
 
-all: ish
-
-ish: parser ish.o
-	$(CC) $(CFLAGS) ish.o parser/parse.o parser/print.o -o ish
-
-ish.o: config.h
-
-parser:
-	cd parser; make
+all: parse.o print.o
 
 clean:
-	cd parser; make clean
-	rm -f *.o myexec ish
+	$(RM) *.o
 
-.PHONY: all clean parser
+.PHONY: all clean
