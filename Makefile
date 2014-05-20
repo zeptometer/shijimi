@@ -1,20 +1,15 @@
-CC = gcc
-LD = gcc
-CFLAGS = -Wall -g -O0 -std=gnu99
-LDFLAGS =
+CC       = gcc
+CFLAGS   = -std=gnu99 -Wall -Wextra
+LDFLAGS  =
+TARGET   = ./bin/shijimi
+OBJECTS  = main.o procset.o parse.o
 
-all: ish
+$(TARGET): $(OBJECTS)
+	$(CC) -o $@ $^ $(LDFLAGS)
 
-ish: parser ish.o
-	$(CC) $(CFLAGS) ish.o parser/parse.o parser/print.o -o ish
+all: clean $(TARGET)
 
-ish.o: config.h
+clean: .PHONY
+	rm -f $(OBJECTS) $(TARGET)
 
-parser:
-	cd parser; make
-
-clean:
-	cd parser; make clean
-	rm -f *.o myexec ish
-
-.PHONY: all clean parser
+.PHONY:
