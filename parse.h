@@ -1,7 +1,7 @@
 #ifndef __PARSE_H__
 #define __PARSE_H__
 
-#define PROMPT "ish$ " /* 入力ライン冒頭の文字列 */
+#define PROMPT "shijimi$ " /* 入力ライン冒頭の文字列 */
 #define NAMELEN 32    /* 各種名前の長さ */
 #define ARGLSTLEN 16  /* 1つのプロセスがとる実行時引数の数 */
 #define LINELEN 256   /* 入力コマンドの長さ */

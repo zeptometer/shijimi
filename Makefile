@@ -1,10 +1,15 @@
-CC = gcc
-CFLAGS = -Wall -g -O0
-SRCS = parser.c
+CC       = gcc
+CFLAGS   = -std=gnu99 -Wall -Wextra 
+LDFLAGS  =
+TARGET   = ./bin/shijimi
+OBJECTS  = main.o procset.o parse.o
 
-all: parse.o print.o
+$(TARGET): $(OBJECTS)
+	$(CC) -o $@ $^ $(LDFLAGS)
 
-clean:
-	$(RM) *.o
+all: clean $(TARGET)
 
-.PHONY: all clean
+clean: .PHONY
+	rm -f $(OBJECTS) $(TARGET)
+
+.PHONY:

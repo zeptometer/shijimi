@@ -1,9 +1,23 @@
-#include "builtin.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/wait.h>
+
+#include "parse.h"
+#include "procset.h"
+#ifdef DEBUG
 #include "print.h"
+#endif
 
-#define BUF_SIZE 100
+const int BUF_SIZE  = 200;
+const int INIT_PROCSET_CAP = 30;
 
+struct sigaction sigign, sigdefault;
+
+pid_t shell_pgid;
 char **envp;
+procset *bg_procs, *cz_procs;
 
 int get_write_option(write_option wo) {
   int op = O_CREAT | O_WRONLY;
@@ -17,105 +31,149 @@ int get_write_option(write_option wo) {
   }
 }
 
-void exec_single_process (job job) {
-  int in = 0, out = 1;
-  process proc = *job->process_list;
+int open_pipes(process *proc) {
+  int pipefd[2];
+  process *prev = NULL;
 
-  if (proc.input_redirection) {
-    in = open(p.input_redirection, O_RDONLY);
-  }
-  if (proc.output_redicretion) {
-    out = open(proc.output_redirection, get_write_option(proc.output_option));
-    access(proc.output_redirection, R_OK|W_OK);
-  }
+  for(; proc != NULL; prev = proc, proc = proc->next) {
+    if (prev == NULL) {
+      if (proc->input_redirection) {
+	proc->in_fd = dup(0);
+      } else {
+	proc->in_fd = open(proc->input_redirection, O_RDONLY);
+      }
+    } else {
+      proc->in_fd = pipefd[0];
+    }
 
-  if (is_builtin(proc.program_name)) {
-    exec_builtin(proc, in, out);
-  } else {
-    exec_program(proc, in, out)
+    if (proc->next == NULL) {
+      if (proc->input_redirection) {
+	proc->out_fd = dup(1);
+      } else {
+	proc->out_fd = open(proc->output_redirection, get_write_option(proc->output_option));
+      }
+    } else {
+      pipe(pipefd);
+      proc->out_fd = pipefd[1];
+    }
   }
+  return 0;
 }
 
-int job_len(job job_list) {
-  job j = job_list;
-  int i = 0;
-  while (j != NULL) {
-    i++;
-    j = j->next;
-  }
-  return i;
+void init_child(process *p) {
+  dup2(p->in_fd, 0);
+  dup2(p->out_fd, 1);
+  close(p->in_fd);
+  close(p->out_fd);
+
+  sigaction(SIGINT,  &sigdefault, NULL);
+  sigaction(SIGTTOU, &sigdefault, NULL);
+  sigaction(SIGTSTP, &sigdefault, NULL);
+
+  execve(p->program_name, p->argument_list, envp);
 }
 
-pid_t child_pgid;
-
-void exec_proc(process proc, int in, itn out, int[][2] pipefd, int len) {
+pid_t exec_process_first(process *p, job_mode mode) {
   pid_t pid = fork();
   if (pid == 0) {
-    dup2(in, 0);
-    dup2(out, 1);
-    for (int i=0; i<len; i++) {
-      close(pipefd[i][0]);
-      close(pipefd[i][1]);
-    }
-    if (child_pgid == 1) {
-      child_pgid = getpgrp();
-      if (j->mode == FOREGROUND)
-	tcsetpgrp(0, child_pgid);
-    }
-    setpgid(child_pgid);
-    execve(proc.program_name, proc.argument_list, envp);
+    pid_t pid = getpid();
+    setpgid(pid, pid);
+    if (mode == FOREGROUND) tcsetpgrp(0, pid);
+    init_child(p);
   } else {
-    
+    close(p->in_fd);
+    close(p->out_fd);
+    return pid;
+  }
+  return -1;
+}
+
+void exec_process(process *p, pid_t pgid) {
+  pid_t pid = fork();
+  if (pid == 0) {
+    setpgid(getpid(), pgid);
+    init_child(p);
+  } else {
+    close(p->in_fd);
+    close(p->out_fd);
   }
 }
 
 void exec_job (job job) {
-  int len = proc_len(job);
-  int pipefd[len][2];
+  process *proc = job.process_list;
 
-  for (int i=0; i<len-1; i++)
-    pipe[pipefd[i]];
+  open_pipes(proc);
 
-  process proc = *job->process;
-  child_pgid = 1;
-
-  int in = (proc->input_redirection)?open(p.input_redirection, O_RDONLY):0;
-  int out = pipefd[0][1];
-  for (int i=0; i<len-1; i++) {
-    exec_proc(proc, in, out);
-    in = pipefd[i][0];
-    out = pipefd[i+1][0];
-    job = job->next;
+  pid_t pgid = exec_process_first(proc, job.mode);
+  for (process *p=proc->next; p!=NULL; p=p->next) {
+    exec_process(p, pgid);
   }
-  if (proc->output_redirection) {
-    int op = get_write_option(proc.output_option)
-    out = open(proc.output_redirection, op);
-  } else {
-    out = 1;
+
+  int status;
+  switch (job.mode) {
+  case FOREGROUND:
+    while (waitpid(-pgid, &status, 0) != -1)
+      if (WIFSTOPPED(status) && in_proc(cz_procs, pgid))
+	push_proc(cz_procs, pgid);
+    tcsetpgrp(0, shell_pgid);
+    break;
+  case BACKGROUND:
+    push_proc(bg_procs, pgid);
+    break;
+  default:
+    fputs("invalid mode", stderr);
+    abort();
   }
-  exec_proc(proc, in, out, pipefd, len);
 }
 
-
-void exec_job_list (job job_list) {
+void exec_job_list (job *job_list) {
   while (job_list != NULL) {
-    exec_job(job_list);
+    exec_job(*job_list);
     job_list = job_list->next;
+  }
+}
+
+void wait_bg_procs() {
+  int status;
+  pid_t child_pid;
+  while ((child_pid = waitpid(-1, &status, WNOHANG)) > 0) {
+    pid_t child_pgid = getpgid(child_pid);
+    if (WIFEXITED(status) || WIFSIGNALED(status)) {
+      pid_t tmp;
+      int status;
+      while ((tmp = waitpid(-child_pgid, &status, WNOHANG)) > 0)
+	;
+      if (tmp == -1)
+	rem_proc(bg_procs, child_pgid);
+    } else if (WIFSTOPPED(status) && in_proc(bg_procs, child_pgid)) {
+      rem_proc(bg_procs, child_pgid);
+      push_proc(cz_procs, child_pgid);
+    }
   }
 }
 
 int main(int argc, char** argv, char** e) {
   envp = e;
+  shell_pgid = getpgrp();
+  bg_procs = make_proc_set(INIT_PROCSET_CAP);
+  cz_procs = make_proc_set(INIT_PROCSET_CAP);
+
+  sigign.sa_handler = SIG_IGN;
+  sigdefault.sa_handler = SIG_DFL;
+  sigaction(SIGINT, &sigign, NULL);
+  sigaction(SIGTTOU, &sigign, NULL);
+  sigaction(SIGTSTP, &sigign, NULL);
 
   while (1) {
     char buf[BUF_SIZE];
     job* job_list;
     if (get_line(buf, BUF_SIZE) == NULL)
-      break;
+      break ;
     job_list = parse_line(buf);
     if (job_list == NULL)
       continue;
 
     exec_job_list(job_list);
+    wait_bg_procs();
   }
 }
