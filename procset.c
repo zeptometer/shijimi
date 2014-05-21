@@ -42,6 +42,8 @@ void rem_proc(procset *ps, pid_t pid) {
     ps->pgids[i] = ps->pgids[i+1];
 }
 
-pid_t pop_proc(procset *ps) {
-  return ps->pgids[--ps->size];
+pid_t pop_proc(procset *ps, int idx) {
+  pid_t pid = ps->pgids[idx];
+  ps->pgids[idx] = ps->pgids[--ps->size];
+  return pid;
 }

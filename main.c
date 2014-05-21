@@ -3,6 +3,8 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <unistd.h>
+#include <string.h>
 
 #include "parse.h"
 #include "procset.h"
@@ -50,7 +52,8 @@ int open_pipes(process *proc) {
       if (proc->input_redirection) {
 	proc->out_fd = dup(1);
       } else {
-	proc->out_fd = open(proc->output_redirection, get_write_option(proc->output_option));
+	int op = get_write_option(proc->output_option);
+	proc->out_fd = open(proc->output_redirection, op, 0664);
       }
     } else {
       pipe(pipefd);
@@ -81,6 +84,7 @@ pid_t exec_process_first(process *p, job_mode mode) {
     if (mode == FOREGROUND) tcsetpgrp(0, pid);
     init_child(p);
   } else {
+    setpgid(pid, pid);
     close(p->in_fd);
     close(p->out_fd);
     return pid;
@@ -94,12 +98,67 @@ void exec_process(process *p, pid_t pgid) {
     setpgid(getpid(), pgid);
     init_child(p);
   } else {
+    setpgid(pid, pgid);
     close(p->in_fd);
     close(p->out_fd);
   }
 }
 
+void wait_foregroud_process(pid_t pgid) {
+  int status;
+  while (waitpid(-pgid, &status, WUNTRACED) != -1) {
+    if (WIFSTOPPED(status) && !in_proc(cz_procs, pgid)) {
+      push_proc(cz_procs, pgid);
+      break;
+    }
+  }
+  tcsetpgrp(0, shell_pgid);
+}
+
+bool exec_builtin(job job) {
+  process *proc = job.process_list;
+  char* name = proc->program_name;
+  char** args = proc->argument_list;
+
+  if (strcmp(name, "exit") == 0) {
+    exit(0);
+  } else if (strcmp(name, "jobs") == 0) {
+    printf("Background Jobs:\n");
+    for (int i=0; i<bg_procs->size; i++)
+      printf("%02d %d\n", i, bg_procs->pgids[i]);
+
+    printf("\nSuspended Jobs:\n");
+    for (int i=0; i<cz_procs->size; i++)
+      printf("%02d %d\n", i, cz_procs->pgids[i]);
+
+    return true;
+  } else if (strcmp(name, "bg") == 0) {
+    int idx = cz_procs->size-1;
+    if (idx < 0)
+      return true;
+
+    pid_t pgid = pop_proc(cz_procs, idx);
+    push_proc(bg_procs, pgid);
+    kill(-pgid, SIGCONT);
+    return true;
+  } else if (strcmp (name, "fg") == 0) {
+    int idx = cz_procs->size-1;
+    if (idx < 0)
+      return true;
+
+    pid_t pgid = pop_proc(cz_procs, idx);
+    tcsetpgrp(0, pgid);
+    kill(-pgid, SIGCONT);
+    wait_foregroud_process(pgid);
+    return true;
+  }
+  return false;
+}
+
 void exec_job (job job) {
+  if (exec_builtin(job))
+    return;
+
   process *proc = job.process_list;
 
   open_pipes(proc);
@@ -109,13 +168,9 @@ void exec_job (job job) {
     exec_process(p, pgid);
   }
 
-  int status;
   switch (job.mode) {
   case FOREGROUND:
-    while (waitpid(-pgid, &status, 0) != -1)
-      if (WIFSTOPPED(status) && in_proc(cz_procs, pgid))
-	push_proc(cz_procs, pgid);
-    tcsetpgrp(0, shell_pgid);
+    wait_foregroud_process(pgid);
     break;
   case BACKGROUND:
     push_proc(bg_procs, pgid);
@@ -134,20 +189,18 @@ void exec_job_list (job *job_list) {
 }
 
 void wait_bg_procs() {
-  int status;
-  pid_t child_pid;
-  while ((child_pid = waitpid(-1, &status, WNOHANG)) > 0) {
-    pid_t child_pgid = getpgid(child_pid);
-    if (WIFEXITED(status) || WIFSIGNALED(status)) {
-      pid_t tmp;
-      int status;
-      while ((tmp = waitpid(-child_pgid, &status, WNOHANG)) > 0)
-	;
-      if (tmp == -1)
-	rem_proc(bg_procs, child_pgid);
-    } else if (WIFSTOPPED(status) && in_proc(bg_procs, child_pgid)) {
-      rem_proc(bg_procs, child_pgid);
-      push_proc(cz_procs, child_pgid);
+  for (int i=0; i<bg_procs->size; i++) {
+    int status;
+    pid_t pgid = bg_procs->pgids[i], tmp;
+    while ((tmp = waitpid(-pgid, &status, WNOHANG)) > 0) {
+      if (WIFSTOPPED(status) && !in_proc(cz_procs, pgid)) {
+	rem_proc(bg_procs, pgid);
+	push_proc(cz_procs, pgid);
+      }
+    }
+    if (tmp == -1) {
+      rem_proc(bg_procs, pgid);
+      printf("job %d terminate\n", pgid);
     }
   }
 }
