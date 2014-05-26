@@ -5,6 +5,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <string.h>
+#include <errno.h>
 
 #include "parse.h"
 #include "procset.h"
@@ -106,11 +107,17 @@ void exec_process(process *p, pid_t pgid) {
 
 void wait_foregroud_process(pid_t pgid) {
   int status;
-  while (waitpid(-pgid, &status, WUNTRACED) != -1) {
-    if (WIFSTOPPED(status) && !in_proc(cz_procs, pgid)) {
-      push_proc(cz_procs, pgid);
-      break;
+  while (1) {
+    while (waitpid(-pgid, &status, WUNTRACED) != -1) {
+      if (WIFSTOPPED(status) && !in_proc(cz_procs, pgid)) {
+	push_proc(cz_procs, pgid);
+	break;
+      }
     }
+    if (errno == ECHILD) break;
+    if (errno == EINTR) continue;
+    perror("error");
+    abort();
   }
   tcsetpgrp(0, shell_pgid);
 }
