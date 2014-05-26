@@ -41,20 +41,20 @@ int open_pipes(process *proc) {
   for(; proc != NULL; prev = proc, proc = proc->next) {
     if (prev == NULL) {
       if (proc->input_redirection) {
-	proc->in_fd = dup(0);
-      } else {
 	proc->in_fd = open(proc->input_redirection, O_RDONLY);
+      } else {
+	proc->in_fd = dup(0);
       }
     } else {
       proc->in_fd = pipefd[0];
     }
 
     if (proc->next == NULL) {
-      if (proc->input_redirection) {
-	proc->out_fd = dup(1);
-      } else {
+      if (proc->output_redirection) {
 	int op = get_write_option(proc->output_option);
 	proc->out_fd = open(proc->output_redirection, op, 0664);
+      } else {
+	proc->out_fd = dup(1);
       }
     } else {
       pipe(pipefd);
